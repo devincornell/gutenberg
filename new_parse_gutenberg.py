@@ -69,7 +69,7 @@ class GutenParser(doctable.DocParser):
         db = GutenDocsDB(fname=dbfname)
         
         # set up gutenberg cache
-        cache = SleepycatMetadataCache('guten_cache2.db')
+        cache = SleepycatMetadataCache('guten_cache3.db')
         set_metadata_cache(cache)
         
         # define parsing functions and regex
@@ -138,6 +138,6 @@ class GutenParser(doctable.DocParser):
                         language, rights, subject, ifnotunique='replace')
                 
 if __name__ == '__main__':
-    parser = GutenParser('db/gutenberg_17.db')
-    parser.parse_gutenberg(workers=20, verbose=False)
+    parser = GutenParser('db/gutenberg_18.db')
+    parser.parse_gutenberg(workers=25, verbose=False)
     

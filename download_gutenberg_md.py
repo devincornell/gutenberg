@@ -10,6 +10,6 @@ from gutenberg.acquire.metadata import SleepycatMetadataCache
 
 if __name__ == '__main__':
     #cache = get_metadata_cache()local/code/doctable/examples/gutenberg
-    cache = SleepycatMetadataCache('guten_cache.sqlite')
+    cache = SleepycatMetadataCache('gutenberg_python_package_db/guten_cache_bak.db')
     cache.populate()
     set_metadata_cache(cache)

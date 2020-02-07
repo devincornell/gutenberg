@@ -19,7 +19,7 @@ from pprint import pprint
 from gutenberg.cleanup import strip_headers
 
 import doctable
-from gutendocdb import GutenDocDB
+from gutendocsdb import GutenDocsDB
 
 class GutenParser(doctable.DocParser):
     ''''''
@@ -40,7 +40,7 @@ class GutenParser(doctable.DocParser):
         #self.nlp = spacy.load('xx_ent_wiki_sm') # multi-language model
         
         self.dbfname = dbfname
-        self.db = GutenDocDB(fname=self.dbfname)
+        self.db = GutenDocsDB(fname=self.dbfname)
         if start_over:
             self.db.update({'text':None, 'par_toks':None, 'par_ptrees':None})
             self.db.clean_col_files('text')
@@ -90,7 +90,7 @@ class GutenParser(doctable.DocParser):
         '''
         
         # create a new database connection
-        db = GutenDocDB(fname=dbfname)
+        db = GutenDocsDB(fname=dbfname)
         
         # define parsing functions and regex
         #re_start = re.compile('\n\*\*\*.*START OF .* GUTENBERG .*\n')

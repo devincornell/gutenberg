@@ -19,7 +19,7 @@ import spacy
 from pprint import pprint
 
 # db to store metadata
-from gutendocdb import GutenDocDB
+from gutendocsdb import GutenDocsDB
 
 # dumb python gutenberg package stuff
 # https://pypi.org/project/Gutenberg/
@@ -45,7 +45,7 @@ class GutenMetaParser(doctable.DocParser):
         
         self.dbfname = dbfname
         self.cache_db = cache_db
-        self.db = GutenDocDB(fname=self.dbfname)
+        self.db = GutenDocsDB(fname=self.dbfname)
         
         # for whatever reason I think this is currently the last book
         last_id = 61041
@@ -81,7 +81,7 @@ class GutenMetaParser(doctable.DocParser):
         '''
         
         # create a new database connection
-        db = GutenDocDB(fname=dbfname)
+        db = GutenDocsDB(fname=dbfname)
         
         # set up gutenberg cache for python package
         cache = SleepycatMetadataCache(cache_db)

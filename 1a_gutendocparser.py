@@ -1,7 +1,6 @@
 
 '''
-This downloads the text and parses each gutenberg text.
-Need to have already run gutenmetadb.py to make the database and populate metdata.
+This uses the .json metadata file to populate the database directly.
 '''
 
 import urllib.request
@@ -14,48 +13,81 @@ import re
 from tqdm import tqdm
 import spacy
 from pprint import pprint
+import json
+import time
+import numpy as np
 
 # dumb python package
 from gutenberg.cleanup import strip_headers
 
 import doctable
-from gutendocdb import GutenDocDB
+from gutendocsdb import GutenDocsDB
 
 class GutenParser(doctable.DocParser):
     ''''''
     spacy_models = {
         'en': 'en_core_web_sm',
-        'de': 'de_core_news_sm',
-        'fr': 'fr_core_news_sm',
-        'es': 'es_core_news_sm',
-        'pt': 'pt_core_news_sm',
-        'it': 'it_core_news_sm',
-        'nl': 'nl_core_news_sm',
-        'el': 'el_core_news_sm',
-        'nb': 'nb_core_news_sm',
-        'lt': 'lt_core_news_sm',
+        #'de': 'de_core_news_sm',
+        #'fr': 'fr_core_news_sm',
+        #'es': 'es_core_news_sm',
+        #'pt': 'pt_core_news_sm',
+        #'it': 'it_core_news_sm',
+        #'nl': 'nl_core_news_sm',
+        #'el': 'el_core_news_sm',
+        #'nb': 'nb_core_news_sm',
+        #'lt': 'lt_core_news_sm',
         #'xx': 'xx_ent_wiki_sm',
     }
     def __init__(self, dbfname, mdfname, start_over=True, **kwargs):
         #self.nlp = spacy.load('xx_ent_wiki_sm') # multi-language model
+        # load json data
         
         self.dbfname = dbfname
-        self.db = GutenDocDB(fname=self.dbfname)
+        self.db = GutenDocsDB(fname=self.dbfname)
         if start_over:
-            self.db.update({'text':None, 'par_toks':None, 'par_ptrees':None})
+            #self.db.update({'text':None, 'par_toks':None, 'par_ptrees':None})
+            self.db.delete()
             self.db.clean_col_files('text')
             self.db.clean_col_files('par_toks')
             self.db.clean_col_files('par_ptrees')
         
-        dat = self.db.select(['gutenid', 'formaturi', 'language'], where=self.db['text']==None)
-        self.ids = [(gid, self.url_from_uri(gid,uri), lang) for gid, uri, lang in dat]
-        self.ids = [(gid, url, lang) for gid, url, lang in self.ids if url != None]
-        print('Found {} of {} docs that have valid urls.'.format(len(self.ids), len(dat)))
+        # load and format metadata
+        with open(mdfname, 'r') as f:
+            meta = json.load(f)
+        meta = [self.format_metadata(gid,md) for gid,md in meta.items()]
+        
+        #dat = self.db.select(['gutenid', 'formaturi', 'language'], where=self.db['text']==None)
+        #self.ids = [(gid, self.url_from_uri(gid,uri), lang) for gid, uri, lang in dat]
+        #self.ids = [(gid, url, lang) for gid, url, lang in self.ids if url != None]
+        #self.meta = [(gid, dat) for gid, dat in meta.items() if gid not in finished_ids]
+        finished_ids = set(self.db.select('gutenid'))
+        self.metadata = [md for md in meta if md['gutenid'] not in finished_ids]
+        print('Found {} of {} docs that have valid urls.'.format(len(self.metadata), len(meta)))
+        
+    @classmethod
+    def format_metadata(cls, gid, md):
+        dat = dict()
+        dat['gutenid'] = int(gid)
+        dat['author'] = cls.format_entry(md['author']).title()
+        dat['formaturi'] = '\n'.join([d.strip() for d in md['formaturi']])
+        dat['language'] = cls.format_entry(md['language'])
+        dat['rights'] = cls.format_entry(md['rights']).title()
+        dat['subject'] = cls.format_entry(md['subject']).title()
+        dat['title'] = cls.format_entry(md['title']).title()
+        dat['url'] = cls.url_from_uri(md['formaturi'])
+        
+        return dat
+        
         
     @staticmethod
-    def url_from_uri(gid, uri):
-        uris = [s for s in uri.split('\n') if s.endswith('.txt')]
-        uris = list(sorted(uris, reverse=True))
+    def format_entry(lines):
+        '''Given a list of entries, cleans formatting of a row.'''
+        return '\n'.join([' '.join(line.strip().lower().split()) for line in lines])
+        
+    @staticmethod
+    def url_from_uri(uris):
+        uris = [s for s in uris if s.endswith('.txt')]
+        uris = list(sorted(uris, reverse=False))
         # find first because later versions have dashes; i.e.:
         # http://www.gutenberg.org/files/13/13.txt vs
         # http://www.gutenberg.org/files/13/13-0.txt (second one is better)
@@ -73,13 +105,13 @@ class GutenParser(doctable.DocParser):
             workers (int or None): number of processes to create for parsing.
         '''
         with doctable.Distribute(workers) as d:
-            res = d.map_chunk(self.parse_guten_chunk, self.ids, 
+            res = d.map_chunk(self.parse_guten_chunk, self.metadata, 
                                self.dbfname, verbose)
         return res
             
     
     @classmethod
-    def parse_guten_chunk(cls, ids, dbfname, verbose):
+    def parse_guten_chunk(cls, metadata, dbfname, verbose):
         '''Runs in separate process for each chunk of nss docs.
         Description: parse each fname and store into database
         Args:
@@ -90,7 +122,7 @@ class GutenParser(doctable.DocParser):
         '''
         
         # create a new database connection
-        db = GutenDocDB(fname=dbfname)
+        db = GutenDocsDB(fname=dbfname)
         
         # define parsing functions and regex
         #re_start = re.compile('\n\*\*\*.*START OF .* GUTENBERG .*\n')
@@ -106,71 +138,102 @@ class GutenParser(doctable.DocParser):
         }
         doc_transform = lambda doc: doctable.DocParser.apply_doc_transform(doc, merge_ents=True)
         
-        
         # loop through each potential document
-        n = len(ids)
+        n = len(metadata)
         i = 0
-        for idx, url, langs in tqdm(ids, total=n, ncols=50):
-            
-            # actually download file (add exception handling later)
-            valid_text = True
-            try:
-                text = urllib.request.urlopen(url).read().decode('utf-8', errors='ignore')
-                text = strip_headers(text).strip().replace('\r','')
-            except urllib.error.HTTPError as e:
-                print('\nThread {} threw http error {}.'.format(ids[0][0], e.code))
-                valid_text = False
+        for md in tqdm(metadata, total=n, ncols=50):
+            row = md # save all metadata columns
             
             # reload all available language models (was having memory probs)
             if i % 3000 == 0:
-                #print('Thread {} loading models.'.format(ids[0][0]))
+                #print('\nThread {} loading models.'.format(metadata[0]['gutenid']))
                 nlps = {l:spacy.load(m) for l,m in cls.spacy_models.items()}
                 #print('Thread {} done loading models.'.format(ids[0][0]))
+            
 
-            # decide language model to use
-            flang = langs.lower().split('\n')[0].strip() if langs != '' else ''
-            if valid_text and flang in nlps:
-                parse_lang = flang
-                nlp = nlps[flang]
+            # actually download file (add exception handling later)
+            valid_text = True
+            if row['url'] is None:
+                valid_text = False
+            else:
+                try:
+                    start = time.time()
+                    text_og = urllib.request.urlopen(row['url']).read().decode('utf-8', errors='ignore')
+                    text = strip_headers(text_og).strip().replace('\r','')
+                    #print('downloaded in {:.3f} sec.'.format(time.time()-start))
+
+                    row['text_body'] = text # save text
+                    row['text_head'] = text_og[:len(text_og)-len(text)]
+                except urllib.error.HTTPError as e:
+                    print('\nThread X threw http error {}: {}'.format(e.code, row['url']))
+                    #raise
+                    valid_text = False
+                #except AttributeError:
+                #    print('\nThread X couldn\'t find url. ({})'.format(row['url']))
+                    #raise
+                #    valid_text = False
+                except urllib.error.URLError:
+                    print('\nURL error. ({})'.format(row['url']))
+                    #raise
+                    time.sleep(np.random.poisson(60))
+                    valid_text = False
+            
+                # decide language model to use
+                first_lang = row['language'].split()[0] if row['language'] != '' else ''
                 
+            
+            if not valid_text or first_lang not in nlps:
+                #ll = '/'.join(r.strip().lower() for r in row['language'])
+                #print('\nlanguage {} was not found ({})'.format(first_lang, row['language']))
+                pass
+                
+            elif valid_text: # first_lang is good and the text is valid
+                parse_lang = first_lang
+                nlp = nlps[first_lang]
+                row['parse_lang'] = first_lang # record parser that was used
+
                 # actually parse texts
-                parsed_pars = doctable.DocParser.parse_text_chunks(text, nlp, 
-                        parse_funcs=parse_funcs, doc_transform=doc_transform, 
-                        paragraph_sep='\n\n', chunk_sents=1000)
+                parse_successful = True
+                try:
+                    parsed_pars = doctable.DocParser.parse_text_chunks(text, nlp, 
+                            parse_funcs=parse_funcs, doc_transform=doc_transform, 
+                            paragraph_sep='\n\n', chunk_sents=1000)
+                    #print('finished parsing')
+                except ValueError:
+                    #raise
+                    print('\nproblem parsing paragraphs')
+                    parse_successful = False
                 
-                # parsed pars is a list of paragraphs as lists of chunks
-                par_ptrees = [[s for ch in par for s in ch['ptrees']] for par in parsed_pars]
-                par_toks = [[s for ch in par for s in ch['toks']] for par in parsed_pars]
+                if parse_successful:
+                    # parsed pars is a list of paragraphs as lists of chunks
+                    row['par_ptrees'] = [[s for ch in par for s in ch['ptrees']] for par in parsed_pars]
+                    row['par_toks'] = [[s for ch in par for s in ch['toks']] for par in parsed_pars]
+                    
+                    #row['num_pars'] = len(row['par_toks']),
+                    #row['num_sents'] = len([s for par in row['par_toks'] for s in par]),
+                    #row['num_toks'] = len([t for par in row['par_toks'] for s in par for t in s]),
+                    
+                    i += 1
                 
                 # insert into db
                 #gutenid, par_toks, par_ptrees, text, **kwargs
-                db.insert_doc(idx, par_toks, par_ptrees, text, parse_lang)
+            #if 'par_ptrees' not in row:
+            #    print('\noh dammit shit')
+            #print({k:type(v) for k,v in row.items()})
+            db.insert(row, ifnotunique='replace')
             
-                i += 1
+                
 
                     
 if __name__ == '__main__':
     mdname = 'metadata/gutenberg-metadata.json'
-    parser = GutenParser('db/gutenberg_22.db', mdname, start_over=False)
-    parser.parse_gutenberg(workers=20, verbose=False)
+    parser = GutenParser('db/gutenberg_00.db', mdname, start_over=False)
+    parser.parse_gutenberg(workers=25, verbose=False)
     #print(parser.ids[:5])
     #len(parser.ids)
     
     
     
     
-    
-'''
-def download_nss(
-	baseurl='https://raw.githubusercontent.com/devincornell/nssdocs/master/docs/',
-	years = (1987, 1988, 1990, 1991, 1993, 1994, 1995, 1996, 1997, 1998, 1999, 2000, 2002, 2006, 2010, 2015, 2017)
-	):
-	def read_url(url):
-		return urllib.request.urlopen(url).read().decode('utf-8')
-	
-	ftemp = baseurl+'{}.txt'
-	all_texts = [read_url(ftemp.format(year)) for year in years]
-	return {yr:text for yr,text in zip(years,all_texts)}
-'''
     
     

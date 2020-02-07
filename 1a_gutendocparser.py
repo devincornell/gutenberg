@@ -228,7 +228,7 @@ class GutenParser(doctable.DocParser):
 if __name__ == '__main__':
     mdname = 'metadata/gutenberg-metadata.json'
     parser = GutenParser('db/gutenberg_00.db', mdname, start_over=False)
-    parser.parse_gutenberg(workers=25, verbose=False)
+    parser.parse_gutenberg(workers=10, verbose=False)
     #print(parser.ids[:5])
     #len(parser.ids)
     
